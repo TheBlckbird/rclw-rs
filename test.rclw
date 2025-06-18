@@ -1,0 +1,12 @@
+SET name Du
+
+OUT {{name}}
+
+
+AT main
+
+OUT end= Name: 
+INPUT name
+OUT {{name}}
+
+TO main
