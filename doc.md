@@ -47,15 +47,20 @@ possible things:
 
 ## Other
 
-for-loop:
+While-loop:
 
 ```
 set counter 0
 
 AT loop
-    math counter add {{counter}} 1
-    out {{counter}}
+    // Condition
     if {{counter}} == 10 t after_loop
+
+    // Body
+    out {{counter}}
+
+    // Increase and repeat
+    math counter add {{counter}} 1
     TO loop
 
 AT after_loop
