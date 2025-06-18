@@ -11,6 +11,7 @@ use std::{
 
 use rand::Rng;
 
+#[derive(Debug)]
 enum LangError {
     NoFilename,
     FileNotFound,
@@ -63,7 +64,7 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
         if let Some(keyword) = parts.next()
             && keyword.to_lowercase() == "at"
         {
-            waypoints.insert(parts.next().unwrap().to_string(), line);
+            waypoints.insert(parts.next().ok_or_args_err(&line)?.to_string(), line);
         }
     }
 
@@ -102,7 +103,7 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
 
         let mut line = line.split(' ');
 
-        let cmd = line.next().unwrap().to_lowercase();
+        let cmd = line.next().ok_or_args_err(&cursor)?.to_lowercase();
         let cmd = cmd.trim();
 
         let args: Vec<&str> = line.collect();
@@ -144,7 +145,7 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
                         }
 
                         "c" => {
-                            cursor = args[4].parse().unwrap();
+                            cursor = args[4].parse().ok_or_not_int_err(&cursor)?;
                             continue;
                         }
 
@@ -168,13 +169,13 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
             }
 
             "ret" => {
-                cursor = lastpos.last().unwrap() + 1;
+                cursor = lastpos.last().ok_or_args_err(&cursor)? + 1;
                 lastpos.remove(lastpos.len() - 1);
                 continue;
             }
 
             "cursor" => {
-                let Ok(new_cursor_position) = args.first().unwrap().parse() else {
+                let Ok(new_cursor_position) = args.first().ok_or_args_err(&cursor)?.parse() else {
                     return Err((LangError::NotInteger, Some(cursor)));
                 };
 
@@ -188,7 +189,10 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
                     .skip(1)
                     .fold(String::new(), |result, val| result + val);
 
-                variables.insert(args.first().unwrap().to_string(), value);
+                variables.insert(
+                    args.first().ok_or_args_err(&cursor)?.trim().to_string(),
+                    value,
+                );
             }
 
             "input" => {
@@ -203,14 +207,25 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
                 stdout().flush().unwrap();
                 stdin().read_line(&mut buffer).unwrap();
 
-                variables.insert(args.first().unwrap().to_string(), buffer.trim().to_string());
+                variables.insert(
+                    args.first().ok_or_args_err(&cursor)?.to_string(),
+                    buffer.trim().to_string(),
+                );
             }
 
             "rand" => {
                 let mut args_iter = args.iter().skip(1);
 
-                let first_number = args_iter.next().unwrap().parse().unwrap();
-                let second_number = args_iter.next().map(|arg| arg.parse().unwrap());
+                let first_number = args_iter
+                    .next()
+                    .ok_or_args_err(&cursor)?
+                    .parse()
+                    .ok_or_not_int_err(&cursor)?;
+
+                let second_number = args
+                    .get(3)
+                    .map(|num| num.parse().ok_or_not_int_err(&cursor))
+                    .transpose()?;
 
                 let range = match second_number {
                     Some(range_end) => first_number..range_end,
@@ -219,58 +234,67 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
 
                 let random_number = rng.random_range(range);
 
-                variables.insert(args.first().unwrap().to_string(), random_number.to_string());
+                variables.insert(
+                    args.first().ok_or_args_err(&cursor)?.to_string(),
+                    random_number.to_string(),
+                );
             }
 
             "math" => {
-                let first_number: f32 = args[2].parse().unwrap();
-                let second_number = args.get(3).map(|arg| arg.parse().unwrap());
+                let first_number: f32 = args[2].parse().ok_or_not_int_err(&cursor)?;
+                let second_number = args
+                    .get(3)
+                    .ok_or_args_err(&cursor)
+                    .and_then(|arg| arg.parse::<f32>().ok_or_not_int_err(&cursor));
 
                 let result = match args[1] {
-                    "add" => first_number + second_number.unwrap(),
+                    "add" => first_number + second_number?,
 
-                    "sub" => first_number - second_number.unwrap(),
+                    "sub" => first_number - second_number?,
 
-                    "mul" => first_number * second_number.unwrap(),
+                    "mul" => first_number * second_number?,
 
                     "div" => {
-                        if second_number.unwrap() == 0.0 {
+                        let second_number = second_number?;
+
+                        if second_number == 0.0 {
                             return Err((LangError::ZeroDivision, Some(cursor)));
                         } else {
-                            first_number / second_number.unwrap()
+                            first_number / second_number
                         }
                     }
 
-                    "mod" => first_number % second_number.unwrap(),
+                    "mod" => first_number % second_number?,
 
-                    "pow" => first_number.powf(second_number.unwrap()),
+                    "pow" => first_number.powf(second_number?),
 
                     "sqrt" => first_number.sqrt(),
 
                     _ => return Err((LangError::UnknownOperation, Some(cursor))),
                 };
 
-                variables.insert(args.first().unwrap().to_string(), result.to_string());
+                variables.insert(
+                    args.first().ok_or_args_err(&cursor)?.to_string(),
+                    result.to_string(),
+                );
             }
 
             "wait" => {
-                let seconds = args.first().unwrap().parse().unwrap();
+                let seconds = args
+                    .first()
+                    .ok_or_args_err(&cursor)?
+                    .parse()
+                    .ok_or_not_int_err(&cursor)?;
                 thread::sleep(Duration::from_secs_f32(seconds));
             }
 
             "out" => {
-                if args.first().unwrap().starts_with("end=") {
-                    // let value = args.iter().skip(1).fold(String::new(), |result, val| {
-                    //     if result.is_empty() {
-                    //         result + val
-                    //     } else {
-                    //         format!("{result} {val}")
-                    //     }
-                    // });
-
+                if let Some(first_arg) = args.first()
+                    && first_arg.starts_with("end=")
+                {
                     let end = args
                         .first()
-                        .unwrap()
+                        .ok_or_args_err(&cursor)?
                         .chars()
                         .skip(4)
                         .fold(String::new(), |result, val| format!("{result}{val}"));
@@ -279,14 +303,6 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
 
                     print!("{value}{end}",);
                 } else {
-                    // let value = args.iter().fold(String::new(), |result, val| {
-                    //     if result.is_empty() {
-                    //         result + val
-                    //     } else {
-                    //         format!("{result} {val}")
-                    //     }
-                    // });
-
                     let value = args.join(" ");
 
                     println!("{value}");
@@ -306,6 +322,31 @@ fn interpret() -> Result<(), (LangError, Option<Line>)> {
     }
 
     Ok(())
+}
+
+trait UnwrapOrLangError<T> {
+    fn ok_or_args_err(self, cursor: &usize) -> Result<T, (LangError, Option<Line>)>;
+    fn ok_or_not_int_err(self, cursor: &usize) -> Result<T, (LangError, Option<Line>)>;
+}
+
+impl<T> UnwrapOrLangError<T> for Option<T> {
+    fn ok_or_args_err(self, cursor: &usize) -> Result<T, (LangError, Option<Line>)> {
+        self.ok_or((LangError::NotEnoughArgs, Some(*cursor)))
+    }
+
+    fn ok_or_not_int_err(self, cursor: &usize) -> Result<T, (LangError, Option<Line>)> {
+        self.ok_or((LangError::NotInteger, Some(*cursor)))
+    }
+}
+
+impl<T, E> UnwrapOrLangError<T> for Result<T, E> {
+    fn ok_or_args_err(self, cursor: &usize) -> Result<T, (LangError, Option<Line>)> {
+        self.map_err(|_| (LangError::NotEnoughArgs, Some(*cursor)))
+    }
+
+    fn ok_or_not_int_err(self, cursor: &usize) -> Result<T, (LangError, Option<Line>)> {
+        self.map_err(|_| (LangError::NotInteger, Some(*cursor)))
+    }
 }
 
 fn error(reason: LangError, line: Option<Line>) {
